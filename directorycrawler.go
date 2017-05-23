@@ -73,6 +73,46 @@ func NewDirectoryCrawler() *DirectoryCrawler {
 	return dc
 }
 
+// Cache loads or removes results from a previous search
+func (dc *DirectoryCrawler) Cache(directory string, options *Options) bool {
+	home := os.Getenv("HOME")
+
+	if home != "" {
+		sanitized := dc.SanitizePath(directory)
+		cache := home + "/.cache/grover/" + sanitized + ".txt"
+
+		if options.clear {
+			err := os.Remove(cache)
+
+			if err != nil {
+				Println("[Error] "+err.Error(), options.verbose)
+			}
+		} else {
+			file, err := os.Open(cache)
+
+			if err != nil {
+				Println("[Info] Cached results not found: "+cache, options.verbose)
+			} else {
+				Println("[Info] Cached results found: "+cache, options.verbose)
+				scanner := bufio.NewScanner(file)
+
+				for scanner.Scan() {
+					line := scanner.Text()
+					file := NewFile()
+					file.name = path.Base(line)
+					file.path = path.Dir(line) + "/"
+					dc.files = append(dc.files, file)
+				}
+
+				file.Close()
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // CacheResults stores results on disk for faster searches
 func (dc *DirectoryCrawler) CacheResults(directory string, verbose bool) {
 	home := os.Getenv("HOME")
@@ -103,11 +143,17 @@ func (dc *DirectoryCrawler) CacheResults(directory string, verbose bool) {
 				file.Close()
 			}
 		}
+	} else {
+		Println("[Error] Path variable HOME not found", verbose)
 	}
 }
 
 // Crawl walks through each directory calling Visit each time
-func (dc *DirectoryCrawler) Crawl(directory string, verbose bool) {
+func (dc *DirectoryCrawler) Crawl(directory string, options *Options) {
+	if dc.Cache(directory, options) {
+		return
+	}
+
 	dc.frontier = append(dc.frontier, directory)
 
 	for len(dc.frontier) > 0 {
@@ -128,20 +174,20 @@ func (dc *DirectoryCrawler) Crawl(directory string, verbose bool) {
 		}
 
 		if !ignore {
-			Println("[Crawling] "+directory, verbose)
+			Println("[Crawling] "+directory, options.verbose)
 			items, err := ioutil.ReadDir(directory)
 
 			if err != nil {
-				Println("[Error] "+err.Error(), verbose)
+				Println("[Error] "+err.Error(), options.verbose)
 			} else {
-				dc.Visit(directory, items, verbose)
+				dc.Visit(directory, items, options.verbose)
 			}
 		} else {
-			Println("[Ignoring] "+directory, verbose)
+			Println("[Ignoring] "+directory, options.verbose)
 		}
 	}
 
-	dc.CacheResults(directory, verbose)
+	dc.CacheResults(directory, options.verbose)
 }
 
 // Find returns an array of possible matches
