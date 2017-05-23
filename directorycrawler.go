@@ -5,7 +5,40 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"sort"
 )
+
+// Match contains information regarding a potential target
+type Match struct {
+	file       *File
+	confidence float64
+}
+
+// Matches is a type alias for an array of pointers of type Match
+type Matches []*Match
+
+// NewMatch returns a pointer to an initialized Match
+func NewMatch() *Match {
+	m := new(Match)
+	m.file = nil
+	m.confidence = 0
+	return m
+}
+
+// Len returns the length of the slice
+func (slice Matches) Len() int {
+	return len(slice)
+}
+
+// Less returns whether the element at i is less than the element at j
+func (slice Matches) Less(i, j int) bool {
+	return slice[i].confidence < slice[j].confidence
+}
+
+// Swap switches around the element at i with the element at j
+func (slice Matches) Swap(i, j int) {
+	slice[i], slice[j] = slice[j], slice[i]
+}
 
 // File contains location information regarding the file
 type File struct {
@@ -23,9 +56,10 @@ func NewFile() *File {
 
 // DirectoryCrawler contains files regarding the crawled directory
 type DirectoryCrawler struct {
-	files    []*File
-	frontier []string
-	ignore   []string
+	files           []*File
+	frontier        []string
+	ignoreDirectory []string
+	ignoreExtension []string
 }
 
 // NewDirectoryCrawler returns a pointer to an initialized DirectoryCrawler
@@ -33,7 +67,8 @@ func NewDirectoryCrawler() *DirectoryCrawler {
 	dc := new(DirectoryCrawler)
 	dc.files = make([]*File, 0)
 	dc.frontier = make([]string, 0)
-	dc.ignore = make([]string, 0)
+	dc.ignoreDirectory = make([]string, 0)
+	dc.ignoreExtension = make([]string, 0)
 	return dc
 }
 
@@ -51,7 +86,7 @@ func (dc *DirectoryCrawler) Crawl(directory string, verbose bool) {
 
 		ignore := false
 
-		for _, v := range dc.ignore {
+		for _, v := range dc.ignoreDirectory {
 			if path.Base(v) == path.Base(directory) {
 				ignore = true
 				break
@@ -59,27 +94,32 @@ func (dc *DirectoryCrawler) Crawl(directory string, verbose bool) {
 		}
 
 		if !ignore {
-			Println("Crawling: "+directory, verbose)
+			Println("[Crawling] "+directory, verbose)
 			items, err := ioutil.ReadDir(directory)
 
 			if err != nil {
-				Println(err, verbose)
+				Println("[Error] "+err.Error(), verbose)
 			} else {
-				dc.Visit(directory, items)
+				dc.Visit(directory, items, verbose)
 			}
 		} else {
-			Println("Ignoring: "+directory, verbose)
+			Println("[Ignoring] "+directory, verbose)
 		}
 	}
 }
 
 // Find returns an array of possible matches
-func (dc *DirectoryCrawler) Find(limit int, name string, threshold float64) []*File {
-	matches := make([]*File, 0)
+func (dc *DirectoryCrawler) Find(limit int, name string, threshold float64) Matches {
+	matches := make(Matches, 0)
 
 	for _, file := range dc.files {
-		if FuzzySearch(name, file.path) > threshold || FuzzySearch(name, file.name) > threshold {
-			matches = append(matches, file)
+		confidence := FuzzySearch(file.name, name)
+
+		if confidence > threshold {
+			match := NewMatch()
+			match.file = file
+			match.confidence = confidence
+			matches = append(matches, match)
 		}
 
 		if limit != -1 && len(matches) == limit {
@@ -87,6 +127,7 @@ func (dc *DirectoryCrawler) Find(limit int, name string, threshold float64) []*F
 		}
 	}
 
+	sort.Sort(matches)
 	return matches
 }
 
@@ -100,7 +141,13 @@ func (dc *DirectoryCrawler) LoadIgnore(verbose bool) {
 		scanner := bufio.NewScanner(file)
 
 		for scanner.Scan() {
-			dc.ignore = append(dc.ignore, scanner.Text())
+			line := scanner.Text()
+
+			if line[0] == '*' {
+				dc.ignoreExtension = append(dc.ignoreExtension, line)
+			} else {
+				dc.ignoreDirectory = append(dc.ignoreDirectory, line)
+			}
 		}
 	}
 
@@ -108,14 +155,27 @@ func (dc *DirectoryCrawler) LoadIgnore(verbose bool) {
 }
 
 // Visit tracks files and folders in the specified directory
-func (dc *DirectoryCrawler) Visit(directory string, items []os.FileInfo) {
+func (dc *DirectoryCrawler) Visit(directory string, items []os.FileInfo, verbose bool) {
 	for _, item := range items {
 		switch item.IsDir() {
 		case false:
-			file := NewFile()
-			file.name = item.Name()
-			file.path = directory
-			dc.files = append(dc.files, file)
+			ignore := false
+
+			for _, v := range dc.ignoreExtension {
+				if path.Ext(v) == path.Ext(item.Name()) {
+					ignore = true
+					break
+				}
+			}
+
+			if !ignore {
+				file := NewFile()
+				file.name = item.Name()
+				file.path = directory
+				dc.files = append(dc.files, file)
+			} else {
+				Println("[Ignoring] "+directory+item.Name(), verbose)
+			}
 		case true:
 			dc.frontier = append(dc.frontier, directory+item.Name())
 		}

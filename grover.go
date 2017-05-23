@@ -22,7 +22,7 @@ func main() {
 
 	fmt.Println("File count: ", len(dc.files))
 
-	for _, file := range dc.Find(-1, options.target, 0.2) {
-		fmt.Println(file.path + file.name)
+	for _, match := range dc.Find(-1, options.target, 0.6) {
+		fmt.Println(match.file.path + match.file.name)
 	}
 }
