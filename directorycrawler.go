@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strings"
 )
 
 // Match contains information regarding a potential target
@@ -72,6 +73,39 @@ func NewDirectoryCrawler() *DirectoryCrawler {
 	return dc
 }
 
+// CacheResults stores results on disk for faster searches
+func (dc *DirectoryCrawler) CacheResults(directory string, verbose bool) {
+	home := os.Getenv("HOME")
+
+	if home != "" {
+		err := os.MkdirAll(home+"/.cache/grover/", os.ModeDir)
+
+		if err != nil {
+			Println("[Error] "+err.Error(), verbose)
+		} else {
+			sanitized := dc.SanitizePath(directory)
+			file, err := os.Create(home + "/.cache/grover/" + sanitized + ".txt")
+
+			if err != nil {
+				Println("[Error] "+err.Error(), verbose)
+			} else {
+				writer := bufio.NewWriter(file)
+
+				for _, v := range dc.files {
+					_, err := writer.WriteString(v.path + v.name + "\n")
+
+					if err != nil {
+						Println("[Error] "+err.Error(), verbose)
+					}
+				}
+
+				writer.Flush()
+				file.Close()
+			}
+		}
+	}
+}
+
 // Crawl walks through each directory calling Visit each time
 func (dc *DirectoryCrawler) Crawl(directory string, verbose bool) {
 	dc.frontier = append(dc.frontier, directory)
@@ -106,6 +140,8 @@ func (dc *DirectoryCrawler) Crawl(directory string, verbose bool) {
 			Println("[Ignoring] "+directory, verbose)
 		}
 	}
+
+	dc.CacheResults(directory, verbose)
 }
 
 // Find returns an array of possible matches
@@ -149,9 +185,23 @@ func (dc *DirectoryCrawler) LoadIgnore(verbose bool) {
 				dc.ignoreDirectory = append(dc.ignoreDirectory, line)
 			}
 		}
-	}
 
-	file.Close()
+		file.Close()
+	}
+}
+
+// SanitizePath replaces all invalid filename characters with percents
+func (dc *DirectoryCrawler) SanitizePath(path string) string {
+	path = strings.Replace(path, "\\", "%", -1)
+	path = strings.Replace(path, "/", "%", -1)
+	path = strings.Replace(path, ":", "%", -1)
+	path = strings.Replace(path, "*", "%", -1)
+	path = strings.Replace(path, "?", "%", -1)
+	path = strings.Replace(path, "\"", "%", -1)
+	path = strings.Replace(path, "<", "%", -1)
+	path = strings.Replace(path, ">", "%", -1)
+	path = strings.Replace(path, "|", "%", -1)
+	return path
 }
 
 // Visit tracks files and folders in the specified directory
